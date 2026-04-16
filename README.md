@@ -21,7 +21,19 @@ Web system for uploading `.docx` files, analyzing content against **system-wide 
   - Saving a new key replaces old key
 - Define **global rules** once for the whole system.
 - Add/remove individual global rules from the UI.
-- Analyze each uploaded document using `{global_rules + document_text}`.
+- Analyze each uploaded document using `{selected_rules + file_name + document_text}`.
+- Analyze tab includes a right-side rules pane with per-rule enable/disable checkboxes (default all enabled).
+- File-name validation is enforced before analysis (length/path/invalid character checks).
+- Friendly size/count limit handling:
+  - Maximum files per bulk request: `20`
+  - Maximum size per file: `10 MB`
+  - User-friendly errors for oversized files and too-many-files uploads
+- Empty (`0 B`) uploads are supported as filename-only analysis (no DOCX parsing crash).
+- Selected file size is displayed in the upload list and per-file result rows/cards.
+- Parsing-safe decision model:
+  - `Compliant`
+  - `Non-compliant`
+  - `Parsing Error` (if model JSON remains invalid after repair)
 - Persist analysis run history.
 - Audit log for key events (verify/save/rules update/analysis success-failure).
 - Assignment prompt log file: `PROMPTS_EVAL_LOG.md`.

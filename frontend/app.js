@@ -106,7 +106,6 @@ function ConfigPage() {
 function RulesPage() {
   const [rules, setRules] = useState([]);
   const [newRule, setNewRule] = useState("");
-  const [version, setVersion] = useState(0);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -114,7 +113,6 @@ function RulesPage() {
     try {
       const data = await api("/rules");
       setRules(data.rules || []);
-      setVersion(data.version || 0);
     } catch (err) {
       setError(err.message);
     }
@@ -138,9 +136,8 @@ function RulesPage() {
         body: JSON.stringify({ text: newRule }),
       });
       setRules(data.rules || []);
-      setVersion(data.version);
       setNewRule("");
-      setMessage(`Rule added. Global rules version ${data.version} is active.`);
+      setMessage("Rule added.");
     } catch (err) {
       setError(err.message);
     }
@@ -154,8 +151,7 @@ function RulesPage() {
         method: "DELETE",
       });
       setRules(data.rules || []);
-      setVersion(data.version);
-      setMessage(`Rule removed. Global rules version ${data.version} is active.`);
+      setMessage("Rule removed.");
     } catch (err) {
       setError(err.message);
     }
@@ -176,7 +172,6 @@ function RulesPage() {
       <button className="primary" onClick={onAddRule}>
         Add Rule
       </button>
-      <p>Current version: {version}</p>
       <h3>Active Rules</h3>
       {rules.length === 0 ? <p>No rules defined yet.</p> : null}
       {rules.map((rule) => (
@@ -208,10 +203,27 @@ function formatSeverity(severity) {
   return String(severity);
 }
 
+function formatFileSize(bytes) {
+  const value = Number(bytes || 0);
+  if (value < 1024) {
+    return `${value} B`;
+  }
+  const kb = value / 1024;
+  if (kb < 1024) {
+    return `${kb.toFixed(1)} KB`;
+  }
+  return `${(kb / 1024).toFixed(2)} MB`;
+}
+
 function AnalyzeResultView({ result }) {
   const analysis = result.analysis || {};
-  const compliant = analysis.compliant === true;
   const violations = Array.isArray(analysis.violations) ? analysis.violations : [];
+  const hasOutputFormatFallback = violations.some(
+    (violation) => String(violation?.rule || "") === "LLM output format validation"
+  );
+  const isParsingError = String(analysis.status || "").toLowerCase() === "parsing_error" || hasOutputFormatFallback;
+  const appliedRules = Array.isArray(result.applied_rules) ? result.applied_rules : [];
+  const compliant = analysis.compliant === true;
   const summaryText = analysis.summary || (compliant ? "No violations were detected." : "Violations were detected.");
   const highestSeverity = violations.some((v) => String(v?.severity || "").toLowerCase() === "high")
     ? "High"
@@ -225,9 +237,14 @@ function AnalyzeResultView({ result }) {
     <section className="analysis-result" aria-label="Compliance assessment report">
       <h3>Compliance Assessment Report</h3>
 
-      <div className={`message ${compliant ? "success" : "error"} report-status`}>
-        <b>Overall Decision:</b> {compliant ? "Compliant" : "Non-compliant"}
+      <div className={`message ${isParsingError ? "warning" : compliant ? "success" : "error"} report-status`}>
+        <b>Overall Decision:</b> {isParsingError ? "Parsing Error" : compliant ? "Compliant" : "Non-compliant"}
       </div>
+      {hasOutputFormatFallback ? (
+        <div className="message warning">
+          Model output was malformed, so a safe fallback result was applied.
+        </div>
+      ) : null}
 
       <p className="report-summary">{summaryText}</p>
 
@@ -248,9 +265,13 @@ function AnalyzeResultView({ result }) {
           Provider: <b>{result.provider}</b>
         </span>
         <span>
-          Rules Version: <b>{result.rules_version}</b>
+          Applied Rules: <b>{appliedRules.length}</b>
         </span>
       </div>
+
+      {appliedRules.length > 0 ? (
+        <p className="muted">Rules used: {appliedRules.map((rule) => rule.text).join(" | ")}</p>
+      ) : null}
 
       {!compliant && violations.length > 0 ? (
         <>
@@ -291,6 +312,8 @@ function AnalyzeResultView({ result }) {
 
 function AnalyzePage() {
   const [files, setFiles] = useState([]);
+  const [rules, setRules] = useState([]);
+  const [selectedRuleIds, setSelectedRuleIds] = useState([]);
   const [results, setResults] = useState([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -342,9 +365,45 @@ function AnalyzePage() {
     setDragActive(false);
   }
 
+  useEffect(() => {
+    async function loadRules() {
+      try {
+        const data = await api("/rules");
+        const loadedRules = data.rules || [];
+        setRules(loadedRules);
+        setSelectedRuleIds(loadedRules.map((rule) => rule.id));
+      } catch (err) {
+        setError(err.message);
+      }
+    }
+    loadRules();
+  }, []);
+
+  function toggleRule(ruleId) {
+    setSelectedRuleIds((prev) => {
+      if (prev.includes(ruleId)) {
+        return prev.filter((id) => id !== ruleId);
+      }
+      return [...prev, ruleId];
+    });
+  }
+
+  function selectedFileSizeByName(fileName) {
+    const match = files.find((file) => file.name === fileName);
+    return match ? match.size : 0;
+  }
+
+  function isFilenameOnlyAnalysis(fileName) {
+    return selectedFileSizeByName(fileName) === 0;
+  }
+
   async function onAnalyze() {
     if (files.length === 0) {
       setError("Choose one or more .docx files first.");
+      return;
+    }
+    if (selectedRuleIds.length === 0) {
+      setError("Select at least one rule to run.");
       return;
     }
     setError("");
@@ -356,6 +415,7 @@ function AnalyzePage() {
       for (const selectedFile of files) {
         formData.append("files", selectedFile);
       }
+      formData.append("enabled_rule_ids", JSON.stringify(selectedRuleIds));
       const response = await api("/analyze/bulk", { method: "POST", body: formData });
       const completedResults = (response.items || []).map((item) => ({
         fileName: item.file_name,
@@ -376,65 +436,88 @@ function AnalyzePage() {
   }
 
   return (
-    <div className="card">
-      <h2>Upload & Analyze</h2>
-      <label>DOCX Files</label>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".docx"
-        multiple
-        onChange={onFileInputChange}
-        style={{ display: "none" }}
-      />
-      <div
-        className={`drop-zone ${dragActive ? "drag-active" : ""}`}
-        onDrop={onDrop}
-        onDragOver={onDragOver}
-        onDragLeave={onDragLeave}
-      >
-        <p>Drag and drop .docx files here, or</p>
-        <button type="button" onClick={onChooseFilesClick}>
-          Browse Files
-        </button>
-      </div>
-      {files.length > 0 ? (
-        <div className="selected-files">
-          <p>
-            Selected files: <b>{files.length}</b>
-          </p>
-          {files.map((selectedFile) => (
-            <p key={selectedFile.name} className="muted selected-file-name">
-              {selectedFile.name}
+    <div className="analyze-layout">
+      <div className="card">
+        <h2>Upload & Analyze</h2>
+        <label>DOCX Files</label>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".docx"
+          multiple
+          onChange={onFileInputChange}
+          style={{ display: "none" }}
+        />
+        <div
+          className={`drop-zone ${dragActive ? "drag-active" : ""}`}
+          onDrop={onDrop}
+          onDragOver={onDragOver}
+          onDragLeave={onDragLeave}
+        >
+          <p>Drag and drop .docx files here, or</p>
+          <button type="button" onClick={onChooseFilesClick}>
+            Browse Files
+          </button>
+        </div>
+        {files.length > 0 ? (
+          <div className="selected-files">
+            <p>
+              Selected files: <b>{files.length}</b>
             </p>
-          ))}
-        </div>
-      ) : null}
-      <button className="primary" onClick={onAnalyze} disabled={loading}>
-        {loading ? "Analyzing..." : `Analyze ${files.length || 0} Document${files.length === 1 ? "" : "s"}`}
-      </button>
-      {loading && progressText ? <p className="muted">{progressText}</p> : null}
+            {files.map((selectedFile) => (
+              <p key={selectedFile.name} className="muted selected-file-name">
+                {selectedFile.name} ({formatFileSize(selectedFile.size)})
+                {selectedFile.size === 0 ? " - filename-only analysis" : ""}
+              </p>
+            ))}
+          </div>
+        ) : null}
+        <button className="primary" onClick={onAnalyze} disabled={loading}>
+          {loading ? "Analyzing..." : `Analyze ${files.length || 0} Document${files.length === 1 ? "" : "s"}`}
+        </button>
+        {loading && progressText ? <p className="muted">{progressText}</p> : null}
 
-      {error ? <div className="message error">{error}</div> : null}
-      {results.length > 0 ? (
-        <div className="bulk-results">
-          <p>
-            Completed: <b>{results.filter((item) => item.ok).length}</b> / {results.length}
-          </p>
-          {results.map((item) =>
-            item.ok ? (
-              <div key={item.data?.run_id || item.fileName} className="card">
-                <p className="muted">File: {item.fileName}</p>
-                <AnalyzeResultView result={item.data} />
-              </div>
-            ) : (
-              <div key={item.fileName} className="message error">
-                <b>{item.fileName}</b>: {item.error}
-              </div>
-            )
-          )}
-        </div>
-      ) : null}
+        {error ? <div className="message error">{error}</div> : null}
+        {results.length > 0 ? (
+          <div className="bulk-results">
+            <p>
+              Completed: <b>{results.filter((item) => item.ok).length}</b> / {results.length}
+            </p>
+            {results.map((item) =>
+              item.ok ? (
+                <div key={item.data?.run_id || item.fileName} className="card">
+                  <p className="muted">
+                    File: {item.fileName} ({formatFileSize(selectedFileSizeByName(item.fileName))})
+                  </p>
+                  {isFilenameOnlyAnalysis(item.fileName) ? (
+                    <p className="muted">This file is empty (0 B), so analysis used file name only.</p>
+                  ) : null}
+                  <AnalyzeResultView result={item.data} />
+                </div>
+              ) : (
+                <div key={item.fileName} className="message error">
+                  <b>{item.fileName}</b> ({formatFileSize(selectedFileSizeByName(item.fileName))}): {item.error}
+                </div>
+              )
+            )}
+          </div>
+        ) : null}
+      </div>
+      <aside className="card rules-pane">
+        <h3>Rules Applied This Run</h3>
+        <p className="muted">Enable or disable rules for this analysis iteration.</p>
+        {rules.length === 0 ? <p>No rules defined yet.</p> : null}
+        {rules.map((rule) => (
+          <label key={rule.id} className="rule-toggle-row">
+            <input
+              type="checkbox"
+              checked={selectedRuleIds.includes(rule.id)}
+              onChange={() => toggleRule(rule.id)}
+            />
+            <span>{rule.text}</span>
+          </label>
+        ))}
+      </aside>
     </div>
   );
 }
@@ -467,7 +550,7 @@ function HistoryPage() {
         <div key={run.run_id} className="card">
           <b>{run.file_name}</b>
           <p>
-            Run: {run.run_id} | Provider: {run.provider} | Rules Version: {run.rules_version}
+            Run: {run.run_id} | Provider: {run.provider} | Applied Rules: {run.applied_rules_count}
           </p>
           <small>{new Date(run.created_at).toLocaleString()}</small>
         </div>

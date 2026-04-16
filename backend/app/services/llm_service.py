@@ -13,6 +13,25 @@ ANTHROPIC_MODEL_CANDIDATES = [
     "claude-3-haiku-20240307",
 ]
 
+WEAPON_FILE_NAME_INDICATORS = {
+    "mlrs",
+    "atgm",
+    "icbm",
+    "tank",
+    "artillery",
+    "missile",
+    "rocket",
+    "warhead",
+    "glock",
+    "rifle",
+    "pistol",
+    "grenade",
+    "howitzer",
+    "mortar",
+    "ak47",
+    "m16",
+}
+
 
 def _openai_text_response(client: OpenAI, prompt: str, max_tokens: int) -> str:
     """
@@ -76,10 +95,10 @@ def verify_provider_key(provider: Provider, api_key: str) -> None:
     _anthropic_text_response(client, prompt="Reply only with OK", max_tokens=5)
 
 
-def _analysis_prompt(rules_text: str, document_text: str) -> str:
+def _analysis_prompt(file_name: str, rules_text: str, document_text: str) -> str:
     return (
         "You are a document compliance analyzer.\n"
-        "Analyze the document according to the provided system rules.\n"
+        "Analyze both the file name and the document content according to the provided system rules.\n"
         "Return only JSON (no markdown, no code fences, no extra text).\n"
         "Return strict JSON with this schema:\n"
         "{\n"
@@ -94,6 +113,7 @@ def _analysis_prompt(rules_text: str, document_text: str) -> str:
         "  ],\n"
         '  "compliant": true_or_false\n'
         "}\n\n"
+        f"FILE NAME:\n{file_name[:200]}\n\n"
         f"SYSTEM RULES:\n{rules_text}\n\n"
         f"DOCUMENT TEXT:\n{document_text[:12000]}"
     )
@@ -143,6 +163,77 @@ def _extract_json(raw: str) -> dict[str, Any]:
         return json.loads(without_trailing_commas)
 
 
+def _rules_list(rules_text: str) -> list[str]:
+    lines = [line.strip() for line in rules_text.splitlines() if line.strip()]
+    normalized: list[str] = []
+    for line in lines:
+        normalized.append(line[2:].strip() if line.startswith("- ") else line)
+    return [line for line in normalized if line]
+
+
+def _file_name_tokens(file_name: str) -> set[str]:
+    normalized = file_name.lower().replace("_", " ").replace("-", " ")
+    return {token for token in re.findall(r"[a-z0-9]+", normalized) if token}
+
+
+def _enforce_filename_rule_guards(file_name: str, rules_text: str, analysis: dict[str, Any]) -> dict[str, Any]:
+    if str(analysis.get("status", "")).lower() == "parsing_error":
+        return analysis
+    rules = _rules_list(rules_text)
+    if not rules:
+        return analysis
+    tokens = _file_name_tokens(file_name)
+    violations = analysis.get("violations")
+    if not isinstance(violations, list):
+        violations = []
+    existing_payload = json.dumps(violations, ensure_ascii=False).lower()
+    matched_indicator = next((term for term in WEAPON_FILE_NAME_INDICATORS if term in tokens), None)
+    if not matched_indicator:
+        analysis["violations"] = violations
+        analysis["compliant"] = bool(analysis.get("compliant", True) and len(violations) == 0)
+        return analysis
+
+    for rule in rules:
+        lowered_rule = rule.lower()
+        if ("weapon" not in lowered_rule) or ("system" not in lowered_rule):
+            continue
+        if lowered_rule in existing_payload or matched_indicator in existing_payload:
+            continue
+        violations.append(
+            {
+                "rule": rule,
+                "severity": "high",
+                "evidence": f'File name "{file_name}"',
+                "explanation": (
+                    f'File name contains weapon-system indicator "{matched_indicator.upper()}", '
+                    "which violates this rule."
+                ),
+            }
+        )
+
+    analysis["violations"] = violations
+    analysis["compliant"] = len(violations) == 0
+    if not analysis["compliant"] and not str(analysis.get("summary", "")).strip():
+        analysis["summary"] = "File name or content violates one or more configured rules."
+    return analysis
+
+
+def _fallback_analysis_from_parse_error(parse_error: Exception) -> dict[str, Any]:
+    return {
+        "summary": "Model response could not be parsed as valid JSON. Review output manually.",
+        "status": "parsing_error",
+        "violations": [
+            {
+                "rule": "LLM output format validation",
+                "severity": "high",
+                "evidence": "",
+                "explanation": f"Parser error: {parse_error}",
+            }
+        ],
+        "compliant": None,
+    }
+
+
 def _repair_json_response(provider: Provider, api_key: str, malformed_response: str) -> str:
     prompt = _repair_prompt(malformed_response)
     if provider == Provider.OPENAI:
@@ -154,22 +245,30 @@ def _repair_json_response(provider: Provider, api_key: str, malformed_response: 
 
 
 def analyze_document(
-    provider: Provider, api_key: str, rules_text: str, document_text: str
+    provider: Provider, api_key: str, file_name: str, rules_text: str, document_text: str
 ) -> tuple[dict[str, Any], str]:
-    prompt = _analysis_prompt(rules_text=rules_text, document_text=document_text)
+    prompt = _analysis_prompt(file_name=file_name, rules_text=rules_text, document_text=document_text)
     if provider == Provider.OPENAI:
         client = OpenAI(api_key=api_key)
         text = _openai_text_response(client, prompt=prompt, max_tokens=500)
         try:
-            return _extract_json(text), prompt
+            parsed = _extract_json(text)
         except ValueError:
             repaired = _repair_json_response(provider=provider, api_key=api_key, malformed_response=text)
-            return _extract_json(repaired), prompt
+            try:
+                parsed = _extract_json(repaired)
+            except ValueError as parse_error:
+                parsed = _fallback_analysis_from_parse_error(parse_error)
+        return _enforce_filename_rule_guards(file_name=file_name, rules_text=rules_text, analysis=parsed), prompt
 
     client = Anthropic(api_key=api_key)
     text = _anthropic_text_response(client, prompt=prompt, max_tokens=500)
     try:
-        return _extract_json(text), prompt
+        parsed = _extract_json(text)
     except ValueError:
         repaired = _repair_json_response(provider=provider, api_key=api_key, malformed_response=text)
-        return _extract_json(repaired), prompt
+        try:
+            parsed = _extract_json(repaired)
+        except ValueError as parse_error:
+            parsed = _fallback_analysis_from_parse_error(parse_error)
+    return _enforce_filename_rule_guards(file_name=file_name, rules_text=rules_text, analysis=parsed), prompt

@@ -15,7 +15,6 @@ def fetch_global_rules() -> GlobalRulesResponse:
     updated_at = datetime.fromisoformat(rules["updated_at"]) if rules["updated_at"] else None
     return GlobalRulesResponse(
         rules=[RuleItem(**rule) for rule in rules["rules"]],
-        version=rules["version"],
         updated_at=updated_at,
     )
 
@@ -26,14 +25,12 @@ def create_global_rule(payload: RuleCreateRequest) -> GlobalRulesResponse:
     log_event(
         "rules.added",
         {
-            "version": saved["version"],
             "rules_count": len(saved["rules"]),
             "added_rule_length": len(payload.text.strip()),
         },
     )
     return GlobalRulesResponse(
         rules=[RuleItem(**rule) for rule in saved["rules"]],
-        version=saved["version"],
         updated_at=datetime.fromisoformat(saved["updated_at"]),
     )
 
@@ -46,13 +43,11 @@ def remove_global_rule(rule_id: str) -> GlobalRulesResponse:
     log_event(
         "rules.removed",
         {
-            "version": saved["version"],
             "rules_count": len(saved["rules"]),
             "removed_rule_id": rule_id,
         },
     )
     return GlobalRulesResponse(
         rules=[RuleItem(**rule) for rule in saved["rules"]],
-        version=saved["version"],
         updated_at=datetime.fromisoformat(saved["updated_at"]),
     )

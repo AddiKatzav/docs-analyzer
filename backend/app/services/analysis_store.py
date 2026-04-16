@@ -32,7 +32,7 @@ def list_runs(limit: int = 50) -> list[AnalysisRunSummary]:
                 run_id=row["run_id"],
                 file_name=row["file_name"],
                 provider=Provider(row["provider"]),
-                rules_version=row["rules_version"],
+                applied_rules_count=int(row.get("applied_rules_count", len(row.get("applied_rule_ids", [])))),
                 created_at=datetime.fromisoformat(row["created_at"]).astimezone(UTC),
             )
         )

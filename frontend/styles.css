@@ -73,6 +73,31 @@ textarea {
   gap: 12px;
 }
 
+.analyze-layout {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 14px;
+  align-items: start;
+}
+
+.rules-pane {
+  position: sticky;
+  top: 16px;
+}
+
+.rule-toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 10px;
+  line-height: 1.4;
+}
+
+.rule-toggle-row input[type="checkbox"] {
+  width: auto;
+  margin: 2px 0 0;
+}
+
 .rule-row {
   display: flex;
   align-items: center;
@@ -225,4 +250,15 @@ textarea {
 .error {
   background: #fdeaea;
   border: 1px solid #f0b2b2;
+}
+
+.warning {
+  background: #fff7e6;
+  border: 1px solid #e7cc8f;
+}
+
+@media (max-width: 900px) {
+  .analyze-layout {
+    grid-template-columns: 1fr;
+  }
 }

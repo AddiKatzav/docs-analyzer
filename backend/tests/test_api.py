@@ -31,24 +31,20 @@ def test_rules_are_global_singleton() -> None:
     _clear_data_files()
     response = client.post("/api/rules", json={"text": "rule one"})
     assert response.status_code == 200
-    assert response.json()["version"] == 1
 
     response = client.post("/api/rules", json={"text": "rule two"})
     assert response.status_code == 200
-    assert response.json()["version"] == 2
 
     response = client.get("/api/rules")
     body = response.json()
     assert len(body["rules"]) == 2
     assert body["rules"][0]["text"] == "rule one"
     assert body["rules"][1]["text"] == "rule two"
-    assert body["version"] == 2
 
     rule_to_remove = body["rules"][0]["id"]
     removed = client.delete(f"/api/rules/{rule_to_remove}")
     assert removed.status_code == 200
     removed_body = removed.json()
-    assert removed_body["version"] == 3
     assert len(removed_body["rules"]) == 1
     assert removed_body["rules"][0]["text"] == "rule two"
 
@@ -79,14 +75,22 @@ def test_config_save_replaces_previous_key(monkeypatch) -> None:
     assert body["provider"] == "CLAUDE"
 
 
+def test_rules_reject_script_like_payload() -> None:
+    _clear_data_files()
+    response = client.post("/api/rules", json={"text": "<script>alert(1)</script>"})
+    assert response.status_code == 422
+    assert "angle brackets" in str(response.json()["detail"]).lower()
+
+
 def test_analyze_uses_global_rules(monkeypatch) -> None:
     _clear_data_files()
     client.put("/api/config", json={"provider": "OPENAI", "api_key": "sk-test-1"})
     client.post("/api/rules", json={"text": "never leak secret tokens"})
 
-    def fake_analyze(provider, api_key, rules_text, document_text):
+    def fake_analyze(provider, api_key, file_name, rules_text, document_text):
         assert provider == Provider.OPENAI
         assert api_key == "sk-test-1"
+        assert file_name == "sample.docx"
         assert "- never leak secret tokens" in rules_text
         assert "secret token abc" in document_text
         return (
@@ -120,8 +124,8 @@ def test_analyze_uses_global_rules(monkeypatch) -> None:
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["rules_version"] == 1
     assert body["analysis"]["compliant"] is False
+    assert len(body["applied_rules"]) == 1
     assert len(client.get("/api/runs").json()) == 1
 
 
@@ -130,10 +134,11 @@ def test_bulk_analyze_processes_all_files(monkeypatch) -> None:
     client.put("/api/config", json={"provider": "OPENAI", "api_key": "sk-test-1"})
     client.post("/api/rules", json={"text": "never leak secret tokens"})
 
-    def fake_analyze(provider, api_key, rules_text, document_text):
+    def fake_analyze(provider, api_key, file_name, rules_text, document_text):
         assert provider == Provider.OPENAI
         assert api_key == "sk-test-1"
         assert "- never leak secret tokens" in rules_text
+        assert file_name in {"ok.docx", "bad.docx"}
         if "force failure" in document_text:
             raise RuntimeError("simulated model failure")
         return (
@@ -181,3 +186,58 @@ def test_bulk_analyze_processes_all_files(monkeypatch) -> None:
     assert body["items"][1]["ok"] is False
     assert "simulated model failure" in body["items"][1]["error"]
     assert len(client.get("/api/runs").json()) == 1
+
+
+def test_analyze_rejects_large_file_with_user_friendly_message() -> None:
+    _clear_data_files()
+    client.put("/api/config", json={"provider": "OPENAI", "api_key": "sk-test-1"})
+    client.post("/api/rules", json={"text": "never leak secret tokens"})
+    oversized_content = b"x" * ((10 * 1024 * 1024) + 1)
+    response = client.post(
+        "/api/analyze",
+        files={
+            "file": (
+                "large.docx",
+                oversized_content,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
+    )
+    assert response.status_code == 400
+    assert "exceeds the maximum allowed size" in response.json()["detail"]
+
+
+def test_analyze_empty_file_uses_filename_only(monkeypatch) -> None:
+    _clear_data_files()
+    client.put("/api/config", json={"provider": "OPENAI", "api_key": "sk-test-1"})
+    client.post("/api/rules", json={"text": "generic rule"})
+
+    def fake_analyze(provider, api_key, file_name, rules_text, document_text):
+        assert provider == Provider.OPENAI
+        assert api_key == "sk-test-1"
+        assert file_name == "empty.docx"
+        assert "- generic rule" in rules_text
+        assert document_text == ""
+        return (
+            {
+                "summary": "filename-only analysis",
+                "violations": [],
+                "compliant": True,
+            },
+            "prompt text",
+        )
+
+    monkeypatch.setattr("app.api.analyze.analyze_document", fake_analyze)
+
+    response = client.post(
+        "/api/analyze",
+        files={
+            "file": (
+                "empty.docx",
+                b"",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["analysis"]["summary"] == "filename-only analysis"
