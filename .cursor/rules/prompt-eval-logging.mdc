@@ -1,0 +1,11 @@
+---
+description: Log user prompts for evaluation tracking
+alwaysApply: true
+---
+
+# Prompt logging workflow
+
+- Document user prompts that guide feature or behavior changes.
+- Save each relevant prompt entry in `PROMPTS_EVAL_LOG.md`.
+- Append new entries instead of overwriting prior history.
+- Keep entries concise and actionable so they are useful for later evaluation.

@@ -3,7 +3,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
-from app.models import AnalyzeResponse
+from app.models import AnalyzeResponse, BulkAnalyzeItem, BulkAnalyzeResponse
 from app.services.analysis_store import add_run
 from app.services.audit_log import log_event
 from app.services.config_store import get_decrypted_api_key
@@ -16,17 +16,7 @@ router = APIRouter(prefix="/analyze", tags=["analyze"])
 MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024
 
 
-@router.post("", response_model=AnalyzeResponse)
-def analyze_docx(file: UploadFile = File(...)) -> AnalyzeResponse:
-    if not file.filename or not file.filename.lower().endswith(".docx"):
-        raise HTTPException(status_code=400, detail="Please upload a .docx file.")
-
-    raw_bytes = file.file.read()
-    if len(raw_bytes) > MAX_FILE_SIZE_BYTES:
-        raise HTTPException(status_code=400, detail="File exceeds 5MB size limit.")
-    file.file.seek(0)
-    uploaded_file_size = len(raw_bytes)
-
+def _load_analysis_context() -> tuple:
     config = get_decrypted_api_key()
     if not config:
         raise HTTPException(status_code=400, detail="No LLM provider configured.")
@@ -36,6 +26,20 @@ def analyze_docx(file: UploadFile = File(...)) -> AnalyzeResponse:
     rule_lines = [rule["text"].strip() for rule in rules["rules"] if rule.get("text", "").strip()]
     if not rule_lines:
         raise HTTPException(status_code=400, detail="Global rules are not configured.")
+    return provider, api_key, rules, rule_lines
+
+
+def _analyze_single_docx(
+    file: UploadFile, provider, api_key: str, rules: dict, rule_lines: list[str]
+) -> AnalyzeResponse:
+    if not file.filename or not file.filename.lower().endswith(".docx"):
+        raise HTTPException(status_code=400, detail="Please upload a .docx file.")
+
+    raw_bytes = file.file.read()
+    if len(raw_bytes) > MAX_FILE_SIZE_BYTES:
+        raise HTTPException(status_code=400, detail="File exceeds 5MB size limit.")
+    file.file.seek(0)
+    uploaded_file_size = len(raw_bytes)
 
     log_event(
         "analysis.started",
@@ -103,3 +107,38 @@ def analyze_docx(file: UploadFile = File(...)) -> AnalyzeResponse:
     except Exception as exc:
         log_event("analysis.failed", {"file_name": file.filename, "error": str(exc)})
         raise HTTPException(status_code=500, detail=f"Analysis failed: {exc}") from exc
+
+
+@router.post("", response_model=AnalyzeResponse)
+def analyze_docx(file: UploadFile = File(...)) -> AnalyzeResponse:
+    provider, api_key, rules, rule_lines = _load_analysis_context()
+    return _analyze_single_docx(file, provider, api_key, rules, rule_lines)
+
+
+@router.post("/bulk", response_model=BulkAnalyzeResponse)
+def analyze_docx_bulk(files: list[UploadFile] = File(...)) -> BulkAnalyzeResponse:
+    if not files:
+        raise HTTPException(status_code=400, detail="Please upload at least one .docx file.")
+
+    provider, api_key, rules, rule_lines = _load_analysis_context()
+    items: list[BulkAnalyzeItem] = []
+
+    for upload_file in files:
+        try:
+            result = _analyze_single_docx(upload_file, provider, api_key, rules, rule_lines)
+            items.append(
+                BulkAnalyzeItem(file_name=result.file_name, ok=True, result=result, error=None)
+            )
+        except HTTPException as exc:
+            items.append(
+                BulkAnalyzeItem(
+                    file_name=upload_file.filename or "unknown.docx",
+                    ok=False,
+                    result=None,
+                    error=str(exc.detail),
+                )
+            )
+
+    succeeded = sum(1 for item in items if item.ok)
+    failed = len(items) - succeeded
+    return BulkAnalyzeResponse(items=items, total=len(items), succeeded=succeeded, failed=failed)

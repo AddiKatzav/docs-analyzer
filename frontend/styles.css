@@ -187,6 +187,36 @@ textarea {
   color: #556079;
 }
 
+.drop-zone {
+  border: 2px dashed #b7bfce;
+  border-radius: 8px;
+  padding: 18px;
+  text-align: center;
+  background: #fbfcff;
+  margin-bottom: 12px;
+}
+
+.drop-zone.drag-active {
+  border-color: #2f5bea;
+  background: #eef3ff;
+}
+
+.selected-files {
+  border: 1px solid #dce2ef;
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 12px;
+  background: #fafbff;
+}
+
+.selected-file-name {
+  margin: 4px 0;
+}
+
+.bulk-results {
+  margin-top: 14px;
+}
+
 .success {
   background: #e8f8ed;
   border: 1px solid #a9ddb7;
