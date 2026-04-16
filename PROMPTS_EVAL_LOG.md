@@ -50,3 +50,15 @@ connection is refused when i reach the health api, check the terminal for the er
 
 ### Prompt 14
 so the interface and seems the backend are up and running. this is a good point to commit, write a detailed message and push to remote.
+
+### Prompt 15
+Now let's deal with errors - On the first configuration screen of adding openai key - I'm getting Key verification failed: Client.__init__() got an unexpected keyword argument 'proxies'
+
+### Prompt 16
+we progerssed a step forward and now I get - Key verification failed: 'OpenAI' object has no attribute 'responses'
+
+### Prompt 17
+open ai flow works - now the anthropic input gives me the error Key verification failed: Error code: 404 - {'type': 'error', 'error': {'type': 'not_found_error', 'message': 'model: claude-3-5-haiku-latest'}}
+
+### Prompt 18
+Now the LLM configs work - good time to commit and push
