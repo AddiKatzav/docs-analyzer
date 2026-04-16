@@ -78,3 +78,17 @@ great - two things that I want to improve -
 
 ### Prompt 22
 please do so
+
+### Prompt 23
+because we save the data in @data folder, let's create a skill that can analyze files here in the coding agent and it will use the rules we got from the app and save in global_rules.json
+
+### Prompt 24
+my mistake - the rules are in .local_data/backend/global_rules.json
+
+verify it and afterwards update @README.md and let's give it a test run here in cursor
+
+### Prompt 25
+I want to test the skill againts @c:\Users\Addi\Downloads\9mm glock purchase.docx @c:\Users\Addi\Downloads\עולים לגובה.docx @c:\Users\Addi\Downloads\שלום עליכם.docx
+
+### Prompt 26
+yes fix it but it should not harm the apps behavior and unit tests

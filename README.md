@@ -62,6 +62,42 @@ Persistent app state (saved API key/rules/history) is kept in:
 .local_data/backend
 ```
 
+## Coding Agent Data Analysis Skill
+
+Use the project skill to analyze local files directly in Cursor with your existing app rules.
+
+```bash
+cd /home/addi/projects/docs-analyzer
+./backend/.venv/bin/python .cursor/skills/data-folder-rules-analyzer/scripts/analyze_data_folder.py --dry-run
+```
+
+Full run (calls configured LLM and writes report):
+
+```bash
+./backend/.venv/bin/python .cursor/skills/data-folder-rules-analyzer/scripts/analyze_data_folder.py
+```
+
+Analyze specific files only (repeat `--file`):
+
+```bash
+./backend/.venv/bin/python .cursor/skills/data-folder-rules-analyzer/scripts/analyze_data_folder.py \
+  --file "/mnt/c/Users/Addi/Downloads/9mm glock purchase.docx" \
+  --file "/mnt/c/Users/Addi/Downloads/עולים לגובה.docx" \
+  --file "/mnt/c/Users/Addi/Downloads/שלום עליכם.docx"
+```
+
+Sync rules from running app API into `.local_data/backend/global_rules.json` before analysis:
+
+```bash
+./backend/.venv/bin/python .cursor/skills/data-folder-rules-analyzer/scripts/analyze_data_folder.py \
+  --sync-rules-from-api \
+  --api-base-url http://localhost:8000
+```
+
+Notes:
+- Reads rules/config from `.local_data/backend` by default (`global_rules.json`, `llm_config.json`, `secret.key`).
+- Includes OpenAI client compatibility fallback for environments that raise `unexpected keyword argument 'proxies'`.
+
 ## Run Full MVP on Localhost (No Docker)
 
 This fallback runs both API and frontend from FastAPI, useful when Docker/image pulls are slow.

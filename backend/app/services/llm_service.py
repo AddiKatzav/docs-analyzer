@@ -2,6 +2,7 @@ import json
 import re
 from typing import Any
 
+import httpx
 from anthropic import Anthropic
 from openai import OpenAI
 
@@ -31,6 +32,17 @@ WEAPON_FILE_NAME_INDICATORS = {
     "ak47",
     "m16",
 }
+
+
+def _create_openai_client(api_key: str) -> OpenAI:
+    try:
+        return OpenAI(api_key=api_key)
+    except TypeError as exc:
+        # Compatibility fallback for environments where OpenAI SDK and httpx versions
+        # disagree on the "proxies" argument in the default internal client.
+        if "proxies" not in str(exc):
+            raise
+        return OpenAI(api_key=api_key, http_client=httpx.Client())
 
 
 def _openai_text_response(client: OpenAI, prompt: str, max_tokens: int) -> str:
@@ -87,7 +99,7 @@ def _anthropic_text_response(client: Anthropic, prompt: str, max_tokens: int) ->
 
 def verify_provider_key(provider: Provider, api_key: str) -> None:
     if provider == Provider.OPENAI:
-        client = OpenAI(api_key=api_key)
+        client = _create_openai_client(api_key=api_key)
         _openai_text_response(client, prompt="Reply only with OK", max_tokens=5)
         return
 
@@ -237,7 +249,7 @@ def _fallback_analysis_from_parse_error(parse_error: Exception) -> dict[str, Any
 def _repair_json_response(provider: Provider, api_key: str, malformed_response: str) -> str:
     prompt = _repair_prompt(malformed_response)
     if provider == Provider.OPENAI:
-        client = OpenAI(api_key=api_key)
+        client = _create_openai_client(api_key=api_key)
         return _openai_text_response(client, prompt=prompt, max_tokens=800)
 
     client = Anthropic(api_key=api_key)
@@ -249,7 +261,7 @@ def analyze_document(
 ) -> tuple[dict[str, Any], str]:
     prompt = _analysis_prompt(file_name=file_name, rules_text=rules_text, document_text=document_text)
     if provider == Provider.OPENAI:
-        client = OpenAI(api_key=api_key)
+        client = _create_openai_client(api_key=api_key)
         text = _openai_text_response(client, prompt=prompt, max_tokens=500)
         try:
             parsed = _extract_json(text)
