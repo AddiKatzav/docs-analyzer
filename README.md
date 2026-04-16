@@ -1,0 +1,107 @@
+# Global-Rules DOCX Analyzer
+
+Web system for uploading `.docx` files, analyzing content against **system-wide free-text rules**, and using external LLM providers (OpenAI or Anthropic Claude) to detect potential confidential-data leakage.
+
+## Tech Stack
+
+- Frontend: React (served as static app via Nginx)
+- Backend: FastAPI (Python)
+- Storage: Local volume (`backend/data`)
+- Containerization: Docker Compose
+
+## Features
+
+- Upload `.docx` files from web UI.
+- Configure LLM provider:
+  - Provider selector: `OPENAI` or `CLAUDE`
+  - API key input
+  - Verify key button
+  - Save key button
+  - Saving a new key replaces old key
+- Define **global rules** once for the whole system.
+- Add/remove individual global rules from the UI.
+- Analyze each uploaded document using `{global_rules + document_text}`.
+- Persist analysis run history.
+- Audit log for key events (verify/save/rules update/analysis success-failure).
+- Assignment prompt log file: `PROMPTS_EVAL_LOG.md`.
+
+## Run with Docker
+
+```bash
+docker compose up --build
+```
+
+Services:
+- Frontend: `http://localhost:3000`
+- Backend API: `http://localhost:8000/api/health`
+- Note: in Docker split mode, `http://localhost:8000/` is backend-only and points you to the UI URL.
+
+Quick reboot script (cleanup + rebuild):
+
+```bash
+cd /home/addi/projects/docs-analyzer
+./scripts/reboot_docker.sh
+```
+
+## Run Full MVP on Localhost (No Docker)
+
+This fallback runs both API and frontend from FastAPI, useful when Docker/image pulls are slow.
+
+```bash
+cd /home/addi/projects/docs-analyzer
+./scripts/run_localhost.sh
+```
+
+Open:
+- Full app UI: `http://localhost:8000`
+- API health: `http://localhost:8000/api/health`
+
+## Demo Flow
+
+1. Open `http://localhost:3000` (Docker) or `http://localhost:8000` (localhost fallback).
+2. Go to **Config** tab:
+   - Choose provider.
+   - Paste API key.
+   - Click **Verify**.
+   - Click **Save**.
+3. Go to **Rules** tab:
+   - Add global rules.
+   - Save.
+4. Go to **Analyze** tab:
+   - Upload a `.docx` file.
+   - Review structured result.
+5. Go to **History** tab:
+   - Inspect previous runs.
+
+## API Endpoints
+
+- `GET /api/health`
+- `GET /api/config/status`
+- `POST /api/config/verify`
+- `PUT /api/config`
+- `GET /api/rules`
+- `POST /api/rules`
+- `DELETE /api/rules/{rule_id}`
+- `POST /api/analyze`
+- `GET /api/runs`
+
+## Local Development (without Docker)
+
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+```
+
+When launched this way, FastAPI serves the frontend automatically from the repo `frontend` directory.
+
+## Testing
+
+```bash
+cd backend
+python -m pytest
+```
+
+Tests mock external LLM calls so they run without vendor API access.

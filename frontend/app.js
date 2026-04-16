@@ -1,0 +1,314 @@
+const { useEffect, useState } = React;
+
+const API_BASE = "/api";
+
+async function api(path, options = {}) {
+  const res = await fetch(`${API_BASE}${path}`, options);
+  const contentType = res.headers.get("content-type") || "";
+  const data = contentType.includes("application/json") ? await res.json() : {};
+  if (!res.ok) {
+    throw new Error(data.detail || "Request failed");
+  }
+  return data;
+}
+
+function ConfigPage() {
+  const [provider, setProvider] = useState("OPENAI");
+  const [apiKey, setApiKey] = useState("");
+  const [status, setStatus] = useState(null);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  async function loadStatus() {
+    try {
+      const data = await api("/config/status");
+      setStatus(data);
+      if (data.provider) {
+        setProvider(data.provider);
+      }
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  useEffect(() => {
+    loadStatus();
+  }, []);
+
+  async function onVerify() {
+    setError("");
+    setMessage("");
+    try {
+      await api("/config/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider, api_key: apiKey }),
+      });
+      setMessage("API key verified successfully.");
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function onSave() {
+    setError("");
+    setMessage("");
+    try {
+      await api("/config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider, api_key: apiKey }),
+      });
+      setApiKey("");
+      setMessage("Configuration saved. Previous key was replaced.");
+      await loadStatus();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  return (
+    <div className="card">
+      <h2>LLM Configuration</h2>
+      <label>Provider</label>
+      <select value={provider} onChange={(e) => setProvider(e.target.value)}>
+        <option value="OPENAI">OpenAI</option>
+        <option value="CLAUDE">Claude (Anthropic)</option>
+      </select>
+
+      <label>API Key</label>
+      <input
+        type="password"
+        value={apiKey}
+        onChange={(e) => setApiKey(e.target.value)}
+        placeholder="Paste provider API key"
+      />
+
+      <div style={{ display: "flex", gap: "8px" }}>
+        <button onClick={onVerify}>Verify</button>
+        <button className="primary" onClick={onSave}>
+          Save
+        </button>
+      </div>
+
+      {status && (
+        <p>
+          Current status: <b>{status.configured ? "Configured" : "Not configured"}</b>
+          {status.provider ? ` (${status.provider})` : ""}
+        </p>
+      )}
+      {message ? <div className="message success">{message}</div> : null}
+      {error ? <div className="message error">{error}</div> : null}
+    </div>
+  );
+}
+
+function RulesPage() {
+  const [rules, setRules] = useState([]);
+  const [newRule, setNewRule] = useState("");
+  const [version, setVersion] = useState(0);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  async function loadRules() {
+    try {
+      const data = await api("/rules");
+      setRules(data.rules || []);
+      setVersion(data.version || 0);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  useEffect(() => {
+    loadRules();
+  }, []);
+
+  async function onAddRule() {
+    setError("");
+    setMessage("");
+    if (!newRule.trim()) {
+      setError("Rule text is required.");
+      return;
+    }
+    try {
+      const data = await api("/rules", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: newRule }),
+      });
+      setRules(data.rules || []);
+      setVersion(data.version);
+      setNewRule("");
+      setMessage(`Rule added. Global rules version ${data.version} is active.`);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function onRemoveRule(ruleId) {
+    setError("");
+    setMessage("");
+    try {
+      const data = await api(`/rules/${ruleId}`, {
+        method: "DELETE",
+      });
+      setRules(data.rules || []);
+      setVersion(data.version);
+      setMessage(`Rule removed. Global rules version ${data.version} is active.`);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  return (
+    <div className="card">
+      <h2>Global Rules</h2>
+      <p>
+        This ruleset is shared by the entire system and applied to every uploaded document.
+      </p>
+      <label>Add Rule</label>
+      <textarea
+        value={newRule}
+        onChange={(e) => setNewRule(e.target.value)}
+        placeholder="Example: Flag any mention of credit card numbers, national IDs, private keys..."
+      />
+      <button className="primary" onClick={onAddRule}>
+        Add Rule
+      </button>
+      <p>Current version: {version}</p>
+      <h3>Active Rules</h3>
+      {rules.length === 0 ? <p>No rules defined yet.</p> : null}
+      {rules.map((rule) => (
+        <div className="rule-row" key={rule.id}>
+          <p className="rule-text">{rule.text}</p>
+          <button onClick={() => onRemoveRule(rule.id)}>Remove</button>
+        </div>
+      ))}
+      {message ? <div className="message success">{message}</div> : null}
+      {error ? <div className="message error">{error}</div> : null}
+    </div>
+  );
+}
+
+function AnalyzePage() {
+  const [file, setFile] = useState(null);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function onAnalyze() {
+    if (!file) {
+      setError("Choose a .docx file first.");
+      return;
+    }
+    setError("");
+    setResult(null);
+    setLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const data = await api("/analyze", { method: "POST", body: formData });
+      setResult(data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="card">
+      <h2>Upload & Analyze</h2>
+      <label>DOCX File</label>
+      <input
+        type="file"
+        accept=".docx"
+        onChange={(e) => setFile(e.target.files?.[0] || null)}
+      />
+      <button className="primary" onClick={onAnalyze} disabled={loading}>
+        {loading ? "Analyzing..." : "Analyze Document"}
+      </button>
+
+      {error ? <div className="message error">{error}</div> : null}
+      {result ? (
+        <>
+          <h3>Result</h3>
+          <p>
+            Run ID: <b>{result.run_id}</b> | Provider: <b>{result.provider}</b> | Rules Version:{" "}
+            <b>{result.rules_version}</b>
+          </p>
+          <pre>{JSON.stringify(result.analysis, null, 2)}</pre>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function HistoryPage() {
+  const [runs, setRuns] = useState([]);
+  const [error, setError] = useState("");
+
+  async function loadRuns() {
+    setError("");
+    try {
+      const data = await api("/runs");
+      setRuns(data);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  useEffect(() => {
+    loadRuns();
+  }, []);
+
+  return (
+    <div className="card">
+      <h2>Analysis History</h2>
+      <button onClick={loadRuns}>Refresh</button>
+      {error ? <div className="message error">{error}</div> : null}
+      {runs.length === 0 ? <p>No analysis runs yet.</p> : null}
+      {runs.map((run) => (
+        <div key={run.run_id} className="card">
+          <b>{run.file_name}</b>
+          <p>
+            Run: {run.run_id} | Provider: {run.provider} | Rules Version: {run.rules_version}
+          </p>
+          <small>{new Date(run.created_at).toLocaleString()}</small>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function App() {
+  const [tab, setTab] = useState("config");
+
+  return (
+    <div className="container">
+      <h1>Global Rules DOCX Analyzer</h1>
+      <div className="tabs">
+        <button className={tab === "config" ? "active" : ""} onClick={() => setTab("config")}>
+          Config
+        </button>
+        <button className={tab === "rules" ? "active" : ""} onClick={() => setTab("rules")}>
+          Rules
+        </button>
+        <button className={tab === "analyze" ? "active" : ""} onClick={() => setTab("analyze")}>
+          Analyze
+        </button>
+        <button className={tab === "history" ? "active" : ""} onClick={() => setTab("history")}>
+          History
+        </button>
+      </div>
+
+      {tab === "config" ? <ConfigPage /> : null}
+      {tab === "rules" ? <RulesPage /> : null}
+      {tab === "analyze" ? <AnalyzePage /> : null}
+      {tab === "history" ? <HistoryPage /> : null}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);

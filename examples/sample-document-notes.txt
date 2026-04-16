@@ -1,0 +1,10 @@
+Client account update:
+
+Customer: Jane Doe
+Email: jane.doe@example.com
+Phone: +1-202-555-0162
+Card: 4111 1111 1111 1111
+CVV: 123
+
+Internal note:
+Do not share this API key publicly: sk-test-abc123def456

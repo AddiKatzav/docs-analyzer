@@ -1,0 +1,5 @@
+1. Flag any exposure of credit card numbers, CVV, or bank account identifiers.
+2. Flag national ID, passport, or social security number disclosures.
+3. Flag private keys, API tokens, or passwords.
+4. Flag unmasked customer email + phone number combinations.
+5. Mark severity as high when multiple confidential items appear in the same paragraph.
