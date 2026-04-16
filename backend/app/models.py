@@ -50,6 +50,20 @@ class AnalyzeResponse(BaseModel):
     created_at: datetime
 
 
+class BulkAnalyzeItem(BaseModel):
+    file_name: str
+    ok: bool
+    result: AnalyzeResponse | None = None
+    error: str | None = None
+
+
+class BulkAnalyzeResponse(BaseModel):
+    items: list[BulkAnalyzeItem]
+    total: int
+    succeeded: int
+    failed: int
+
+
 class AnalysisRunSummary(BaseModel):
     run_id: str
     file_name: str

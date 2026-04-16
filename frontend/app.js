@@ -1,4 +1,4 @@
-const { useEffect, useState } = React;
+const { useEffect, useRef, useState } = React;
 
 const API_BASE = "/api";
 
@@ -290,46 +290,151 @@ function AnalyzeResultView({ result }) {
 }
 
 function AnalyzePage() {
-  const [file, setFile] = useState(null);
-  const [result, setResult] = useState(null);
+  const [files, setFiles] = useState([]);
+  const [results, setResults] = useState([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const [progressText, setProgressText] = useState("");
+  const fileInputRef = useRef(null);
+
+  function normalizeDocxFiles(inputFiles) {
+    const validFiles = Array.from(inputFiles || []).filter((candidate) =>
+      String(candidate?.name || "").toLowerCase().endsWith(".docx")
+    );
+    const dedupedByName = new Map(validFiles.map((candidate) => [candidate.name, candidate]));
+    return Array.from(dedupedByName.values());
+  }
+
+  function onFileInputChange(event) {
+    const selectedFiles = normalizeDocxFiles(event.target.files);
+    setFiles(selectedFiles);
+    setResults([]);
+    setError(
+      selectedFiles.length > 0 ? "" : "Please select at least one .docx file."
+    );
+  }
+
+  function onChooseFilesClick() {
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  }
+
+  function onDrop(event) {
+    event.preventDefault();
+    setDragActive(false);
+    const droppedFiles = normalizeDocxFiles(event.dataTransfer?.files);
+    setFiles(droppedFiles);
+    setResults([]);
+    setError(droppedFiles.length > 0 ? "" : "Only .docx files are supported.");
+  }
+
+  function onDragOver(event) {
+    event.preventDefault();
+    if (!dragActive) {
+      setDragActive(true);
+    }
+  }
+
+  function onDragLeave(event) {
+    event.preventDefault();
+    setDragActive(false);
+  }
 
   async function onAnalyze() {
-    if (!file) {
-      setError("Choose a .docx file first.");
+    if (files.length === 0) {
+      setError("Choose one or more .docx files first.");
       return;
     }
     setError("");
-    setResult(null);
+    setResults([]);
     setLoading(true);
     try {
+      setProgressText(`Uploading ${files.length} file${files.length === 1 ? "" : "s"}...`);
       const formData = new FormData();
-      formData.append("file", file);
-      const data = await api("/analyze", { method: "POST", body: formData });
-      setResult(data);
+      for (const selectedFile of files) {
+        formData.append("files", selectedFile);
+      }
+      const response = await api("/analyze/bulk", { method: "POST", body: formData });
+      const completedResults = (response.items || []).map((item) => ({
+        fileName: item.file_name,
+        ok: item.ok === true,
+        data: item.result || null,
+        error: item.error || "Analysis failed",
+      }));
+      setResults(completedResults);
+      if (completedResults.every((item) => !item.ok)) {
+        setError("All files failed analysis. Check per-file errors below.");
+      }
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
+      setProgressText("");
     }
   }
 
   return (
     <div className="card">
       <h2>Upload & Analyze</h2>
-      <label>DOCX File</label>
+      <label>DOCX Files</label>
       <input
+        ref={fileInputRef}
         type="file"
         accept=".docx"
-        onChange={(e) => setFile(e.target.files?.[0] || null)}
+        multiple
+        onChange={onFileInputChange}
+        style={{ display: "none" }}
       />
+      <div
+        className={`drop-zone ${dragActive ? "drag-active" : ""}`}
+        onDrop={onDrop}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+      >
+        <p>Drag and drop .docx files here, or</p>
+        <button type="button" onClick={onChooseFilesClick}>
+          Browse Files
+        </button>
+      </div>
+      {files.length > 0 ? (
+        <div className="selected-files">
+          <p>
+            Selected files: <b>{files.length}</b>
+          </p>
+          {files.map((selectedFile) => (
+            <p key={selectedFile.name} className="muted selected-file-name">
+              {selectedFile.name}
+            </p>
+          ))}
+        </div>
+      ) : null}
       <button className="primary" onClick={onAnalyze} disabled={loading}>
-        {loading ? "Analyzing..." : "Analyze Document"}
+        {loading ? "Analyzing..." : `Analyze ${files.length || 0} Document${files.length === 1 ? "" : "s"}`}
       </button>
+      {loading && progressText ? <p className="muted">{progressText}</p> : null}
 
       {error ? <div className="message error">{error}</div> : null}
-      {result ? <AnalyzeResultView result={result} /> : null}
+      {results.length > 0 ? (
+        <div className="bulk-results">
+          <p>
+            Completed: <b>{results.filter((item) => item.ok).length}</b> / {results.length}
+          </p>
+          {results.map((item) =>
+            item.ok ? (
+              <div key={item.data?.run_id || item.fileName} className="card">
+                <p className="muted">File: {item.fileName}</p>
+                <AnalyzeResultView result={item.data} />
+              </div>
+            ) : (
+              <div key={item.fileName} className="message error">
+                <b>{item.fileName}</b>: {item.error}
+              </div>
+            )
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }

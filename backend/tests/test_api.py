@@ -123,3 +123,61 @@ def test_analyze_uses_global_rules(monkeypatch) -> None:
     assert body["rules_version"] == 1
     assert body["analysis"]["compliant"] is False
     assert len(client.get("/api/runs").json()) == 1
+
+
+def test_bulk_analyze_processes_all_files(monkeypatch) -> None:
+    _clear_data_files()
+    client.put("/api/config", json={"provider": "OPENAI", "api_key": "sk-test-1"})
+    client.post("/api/rules", json={"text": "never leak secret tokens"})
+
+    def fake_analyze(provider, api_key, rules_text, document_text):
+        assert provider == Provider.OPENAI
+        assert api_key == "sk-test-1"
+        assert "- never leak secret tokens" in rules_text
+        if "force failure" in document_text:
+            raise RuntimeError("simulated model failure")
+        return (
+            {
+                "summary": "No violations",
+                "violations": [],
+                "compliant": True,
+            },
+            "prompt text",
+        )
+
+    monkeypatch.setattr("app.api.analyze.analyze_document", fake_analyze)
+
+    ok_file = _build_docx_bytes("Everything is compliant")
+    bad_file = _build_docx_bytes("force failure")
+    response = client.post(
+        "/api/analyze/bulk",
+        files=[
+            (
+                "files",
+                (
+                    "ok.docx",
+                    ok_file,
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ),
+            ),
+            (
+                "files",
+                (
+                    "bad.docx",
+                    bad_file,
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ),
+            ),
+        ],
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 2
+    assert body["succeeded"] == 1
+    assert body["failed"] == 1
+    assert len(body["items"]) == 2
+    assert body["items"][0]["ok"] is True
+    assert body["items"][0]["result"]["file_name"] == "ok.docx"
+    assert body["items"][1]["ok"] is False
+    assert "simulated model failure" in body["items"][1]["error"]
+    assert len(client.get("/api/runs").json()) == 1

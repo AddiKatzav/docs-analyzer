@@ -62,3 +62,19 @@ open ai flow works - now the anthropic input gives me the error Key verification
 
 ### Prompt 18
 Now the LLM configs work - good time to commit and push
+
+### Prompt 19
+The system works fine - from now on please any new feature work on a seperate branch - better to place this from now on to a rulefile.
+
+### Prompt 20
+also important to document prompts i give and save them to PROMPTS_EVAL_LOG.md - add this also to a rule file
+
+### Prompt 21
+great - two things that I want to improve -
+1. perserve state of the API key and rules between system resets that happen during scripts/reboot_docker.sh  - maybe the container can mount a volume to a local simple folder to save these pieces of data
+2. for the file upload I want two enhacements -
+2.1 bulk upload and analysis of file
+2.2 drag and drop interface instead of a "browse" button
+
+### Prompt 22
+please do so

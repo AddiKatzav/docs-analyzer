@@ -1,0 +1,12 @@
+---
+description: Keep feature work on separate branches
+alwaysApply: true
+---
+
+# Feature branch workflow
+
+- For any new feature, do not implement directly on `main`.
+- Create (or switch to) a dedicated feature branch before coding.
+- Prefer branch names like `feature/<short-description>` (for example, `feature/add-doc-cache`).
+- Keep commits for feature work on that branch until merged.
+- If already on `main` when feature work is requested, first create a new branch and continue there.

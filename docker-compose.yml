@@ -6,7 +6,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - backend_data:/app/data
+      - ./.local_data/backend:/app/data
 
   frontend:
     build:
@@ -16,6 +16,3 @@ services:
       - "3000:80"
     depends_on:
       - backend
-
-volumes:
-  backend_data:
