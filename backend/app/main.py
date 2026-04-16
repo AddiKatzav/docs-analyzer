@@ -36,11 +36,16 @@ app.include_router(runs_router, prefix="/api")
 _frontend_root = FRONTEND_DIR.resolve()
 _index_file = _frontend_root / "index.html"
 _frontend_available = _frontend_root.exists() and _index_file.exists()
+_frontend_no_cache_headers = {
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
 
 @app.get("/", include_in_schema=False, response_model=None)
 def serve_frontend_root():
     if _frontend_available:
-        return FileResponse(_index_file)
+        return FileResponse(_index_file, headers=_frontend_no_cache_headers)
     # In Docker split mode, UI is served by the frontend container on port 3000.
     return JSONResponse(
         {
@@ -59,7 +64,7 @@ if _frontend_available:
         if not str(requested).startswith(str(_frontend_root)):
             raise HTTPException(status_code=404, detail="Not Found")
         if requested.is_file():
-            return FileResponse(requested)
+            return FileResponse(requested, headers=_frontend_no_cache_headers)
         if _index_file.exists():
-            return FileResponse(_index_file)
+            return FileResponse(_index_file, headers=_frontend_no_cache_headers)
         raise HTTPException(status_code=404, detail="Frontend file not found.")

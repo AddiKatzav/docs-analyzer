@@ -191,6 +191,104 @@ function RulesPage() {
   );
 }
 
+function formatSeverity(severity) {
+  if (!severity) {
+    return "Unknown";
+  }
+  const value = String(severity).toLowerCase();
+  if (value === "high") {
+    return "High";
+  }
+  if (value === "medium") {
+    return "Medium";
+  }
+  if (value === "low") {
+    return "Low";
+  }
+  return String(severity);
+}
+
+function AnalyzeResultView({ result }) {
+  const analysis = result.analysis || {};
+  const compliant = analysis.compliant === true;
+  const violations = Array.isArray(analysis.violations) ? analysis.violations : [];
+  const summaryText = analysis.summary || (compliant ? "No violations were detected." : "Violations were detected.");
+  const highestSeverity = violations.some((v) => String(v?.severity || "").toLowerCase() === "high")
+    ? "High"
+    : violations.some((v) => String(v?.severity || "").toLowerCase() === "medium")
+      ? "Medium"
+      : violations.some((v) => String(v?.severity || "").toLowerCase() === "low")
+        ? "Low"
+        : "None";
+
+  return (
+    <section className="analysis-result" aria-label="Compliance assessment report">
+      <h3>Compliance Assessment Report</h3>
+
+      <div className={`message ${compliant ? "success" : "error"} report-status`}>
+        <b>Overall Decision:</b> {compliant ? "Compliant" : "Non-compliant"}
+      </div>
+
+      <p className="report-summary">{summaryText}</p>
+
+      <div className="analysis-meta report-meta">
+        <span>
+          Findings: <b>{violations.length}</b>
+        </span>
+        <span>
+          Highest Severity: <b>{highestSeverity}</b>
+        </span>
+      </div>
+
+      <div className="analysis-meta technical-meta">
+        <span>
+          Run ID: <b>{result.run_id}</b>
+        </span>
+        <span>
+          Provider: <b>{result.provider}</b>
+        </span>
+        <span>
+          Rules Version: <b>{result.rules_version}</b>
+        </span>
+      </div>
+
+      {!compliant && violations.length > 0 ? (
+        <>
+          <h4>Findings</h4>
+          <div className="violations-list">
+            {violations.map((violation, index) => (
+              <div className="violation-card" key={`${result.run_id}-${index}`}>
+                <div className="violation-top-row">
+                  <b>Rule: {violation.rule || "Rule violation"}</b>
+                  <span className={`severity-badge severity-${String(violation.severity || "").toLowerCase()}`}>
+                    {formatSeverity(violation.severity)}
+                  </span>
+                </div>
+                {violation.explanation ? (
+                  <p className="violation-explanation">
+                    <b>Why this is an issue:</b> {violation.explanation}
+                  </p>
+                ) : null}
+                {violation.evidence ? (
+                  <p className="violation-evidence">
+                    <b>Evidence from document:</b> <em>{violation.evidence}</em>
+                  </p>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </>
+      ) : null}
+
+      {!compliant && violations.length === 0 ? (
+        <p className="muted">
+          Violations were flagged, but no detailed violation entries were returned.
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
 function AnalyzePage() {
   const [file, setFile] = useState(null);
   const [result, setResult] = useState(null);
@@ -231,16 +329,7 @@ function AnalyzePage() {
       </button>
 
       {error ? <div className="message error">{error}</div> : null}
-      {result ? (
-        <>
-          <h3>Result</h3>
-          <p>
-            Run ID: <b>{result.run_id}</b> | Provider: <b>{result.provider}</b> | Rules Version:{" "}
-            <b>{result.rules_version}</b>
-          </p>
-          <pre>{JSON.stringify(result.analysis, null, 2)}</pre>
-        </>
-      ) : null}
+      {result ? <AnalyzeResultView result={result} /> : null}
     </div>
   );
 }

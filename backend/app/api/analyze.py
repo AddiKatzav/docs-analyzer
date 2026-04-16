@@ -25,6 +25,7 @@ def analyze_docx(file: UploadFile = File(...)) -> AnalyzeResponse:
     if len(raw_bytes) > MAX_FILE_SIZE_BYTES:
         raise HTTPException(status_code=400, detail="File exceeds 5MB size limit.")
     file.file.seek(0)
+    uploaded_file_size = len(raw_bytes)
 
     config = get_decrypted_api_key()
     if not config:
@@ -35,6 +36,16 @@ def analyze_docx(file: UploadFile = File(...)) -> AnalyzeResponse:
     rule_lines = [rule["text"].strip() for rule in rules["rules"] if rule.get("text", "").strip()]
     if not rule_lines:
         raise HTTPException(status_code=400, detail="Global rules are not configured.")
+
+    log_event(
+        "analysis.started",
+        {
+            "file_name": file.filename,
+            "file_size_bytes": uploaded_file_size,
+            "rules_version": rules["version"],
+            "rules_count": len(rule_lines),
+        },
+    )
 
     try:
         storage_path, original_file_name = save_uploaded_docx(file)
@@ -67,9 +78,15 @@ def analyze_docx(file: UploadFile = File(...)) -> AnalyzeResponse:
                 "file_name": original_file_name,
                 "provider": provider.value,
                 "rules_version": rules["version"],
+                "file_size_bytes": uploaded_file_size,
+                "rules_count": len(rule_lines),
                 "document_chars": len(document_text),
                 "prompt_chars": len(prompt),
                 "analysis_keys": list(analysis_json.keys()),
+                "summary": analysis_json.get("summary"),
+                "compliant": analysis_json.get("compliant"),
+                "violations_count": len(analysis_json.get("violations", [])),
+                "violations": analysis_json.get("violations", []),
             },
         )
 

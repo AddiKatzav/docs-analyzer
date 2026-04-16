@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Any
 
 from anthropic import Anthropic
@@ -79,6 +80,7 @@ def _analysis_prompt(rules_text: str, document_text: str) -> str:
     return (
         "You are a document compliance analyzer.\n"
         "Analyze the document according to the provided system rules.\n"
+        "Return only JSON (no markdown, no code fences, no extra text).\n"
         "Return strict JSON with this schema:\n"
         "{\n"
         '  "summary": "short text",\n'
@@ -97,13 +99,58 @@ def _analysis_prompt(rules_text: str, document_text: str) -> str:
     )
 
 
-def _extract_json(raw: str) -> dict[str, Any]:
-    raw = raw.strip()
-    start = raw.find("{")
-    end = raw.rfind("}")
+def _repair_prompt(raw_response: str) -> str:
+    return (
+        "You will receive a malformed JSON payload from another model.\n"
+        "Your task: convert it into valid strict JSON ONLY (no markdown or explanation).\n"
+        "Use this schema exactly:\n"
+        "{\n"
+        '  "summary": "short text",\n'
+        '  "violations": [\n'
+        "    {\n"
+        '      "rule": "rule text",\n'
+        '      "severity": "low|medium|high",\n'
+        '      "evidence": "snippet from document",\n'
+        '      "explanation": "why it violates"\n'
+        "    }\n"
+        "  ],\n"
+        '  "compliant": true_or_false\n'
+        "}\n\n"
+        "Fix escaping/commas/quotes as needed, but preserve semantic meaning.\n\n"
+        f"MALFORMED INPUT:\n{raw_response[:16000]}"
+    )
+
+
+def _extract_json_slice(raw: str) -> str:
+    stripped = raw.strip()
+    if stripped.startswith("```"):
+        stripped = re.sub(r"^```(?:json)?\s*", "", stripped, flags=re.IGNORECASE)
+        stripped = re.sub(r"\s*```$", "", stripped)
+    start = stripped.find("{")
+    end = stripped.rfind("}")
     if start == -1 or end == -1 or end <= start:
         raise ValueError("LLM response was not valid JSON.")
-    return json.loads(raw[start : end + 1])
+    return stripped[start : end + 1]
+
+
+def _extract_json(raw: str) -> dict[str, Any]:
+    candidate = _extract_json_slice(raw)
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        # Common model issue: trailing commas before } or ].
+        without_trailing_commas = re.sub(r",\s*([}\]])", r"\1", candidate)
+        return json.loads(without_trailing_commas)
+
+
+def _repair_json_response(provider: Provider, api_key: str, malformed_response: str) -> str:
+    prompt = _repair_prompt(malformed_response)
+    if provider == Provider.OPENAI:
+        client = OpenAI(api_key=api_key)
+        return _openai_text_response(client, prompt=prompt, max_tokens=800)
+
+    client = Anthropic(api_key=api_key)
+    return _anthropic_text_response(client, prompt=prompt, max_tokens=800)
 
 
 def analyze_document(
@@ -113,8 +160,16 @@ def analyze_document(
     if provider == Provider.OPENAI:
         client = OpenAI(api_key=api_key)
         text = _openai_text_response(client, prompt=prompt, max_tokens=500)
-        return _extract_json(text), prompt
+        try:
+            return _extract_json(text), prompt
+        except ValueError:
+            repaired = _repair_json_response(provider=provider, api_key=api_key, malformed_response=text)
+            return _extract_json(repaired), prompt
 
     client = Anthropic(api_key=api_key)
     text = _anthropic_text_response(client, prompt=prompt, max_tokens=500)
-    return _extract_json(text), prompt
+    try:
+        return _extract_json(text), prompt
+    except ValueError:
+        repaired = _repair_json_response(provider=provider, api_key=api_key, malformed_response=text)
+        return _extract_json(repaired), prompt
